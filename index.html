@@ -437,11 +437,17 @@ async function loadFromFirebase() {
     fbLoaded = true;
     refreshDashboard();
     refreshInputPreview();
+    showToast('\u2705 Terhubung ke Firebase!');
   } catch(e) {
-    console.warn('Firebase load error:', e);
+    console.error('Firebase load error:', e);
     fbLoaded = true;
     refreshDashboard();
     refreshInputPreview();
+    if(e.code === 'PERMISSION_DENIED') {
+      showToast('\u26a0\ufe0f Akses ditolak. Periksa Rules Firebase!', 4000);
+    } else {
+      showToast('\u26a0\ufe0f Gagal konek Firebase: ' + e.message, 4000);
+    }
   }
 }
 
