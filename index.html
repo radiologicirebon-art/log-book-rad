@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -386,7 +386,7 @@ const firebaseConfig = {
 };
 
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+const db = firebase.database().ref('kinerja');
 
 // =========================================
 // DATA
@@ -430,8 +430,10 @@ let fbLoaded = false;
 // =========================================
 async function loadFromFirebase() {
   try {
-    const snap = await db.collection('kinerja').orderBy('createdAt','desc').get();
-    kinerjData = snap.docs.map(d => ({id:d.id,...d.data()}));
+    const snap = await db.once('value');
+    const raw = snap.val() || {};
+    kinerjData = Object.entries(raw).map(([id, d]) => ({id, ...d}));
+    kinerjData.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
     fbLoaded = true;
     refreshDashboard();
     refreshInputPreview();
@@ -617,18 +619,19 @@ async function simpanData() {
   if(pasien<=0) { stat.textContent='&#9888; Masukkan jumlah pasien yang valid'; stat.style.color='var(--red)'; return; }
 
   stat.textContent='Menyimpan...'; stat.style.color='var(--text-3)';
-  const entry = {nik,nama,bulan,tahun,pasien,grade:getGrade(pasien),createdAt:firebase.firestore.FieldValue.serverTimestamp()};
+  const entry = {nik,nama,bulan,tahun,pasien,grade:getGrade(pasien),createdAt:Date.now()};
 
   try {
-    // Check existing
-    const q = await db.collection('kinerja').where('nik','==',nik).where('bulan','==',bulan).where('tahun','==',tahun).get();
-    if(!q.empty) {
-      await q.docs[0].ref.update({pasien,grade:getGrade(pasien)});
-      const idx = kinerjData.findIndex(d=>d.nik===nik&&d.bulan===bulan&&d.tahun===tahun);
-      if(idx>=0) kinerjData[idx]={...kinerjData[idx],...entry};
+    // Check existing by nik+bulan+tahun
+    const existing = kinerjData.find(d=>d.nik===nik&&d.bulan===bulan&&d.tahun===tahun);
+    if(existing) {
+      await db.child(existing.id).update({pasien,grade:getGrade(pasien),createdAt:Date.now()});
+      const idx = kinerjData.findIndex(d=>d.id===existing.id);
+      if(idx>=0) kinerjData[idx]={...kinerjData[idx],pasien,grade:getGrade(pasien)};
     } else {
-      const ref = await db.collection('kinerja').add(entry);
-      kinerjData.unshift({id:ref.id,...entry});
+      const ref = db.push();
+      await ref.set(entry);
+      kinerjData.unshift({id:ref.key,...entry});
     }
     stat.textContent='&#10003; Berhasil disimpan ke Firebase!'; stat.style.color='var(--teal)';
     showToast('&#128190; Data tersimpan ke Firebase!');
@@ -668,7 +671,7 @@ function refreshInputPreview() {
 async function hapusEntry(id) {
   if(!confirm('Hapus data ini dari Firebase?')) return;
   try {
-    await db.collection('kinerja').doc(id).delete();
+    await db.child(id).remove();
     kinerjData = kinerjData.filter(d=>d.id!==id);
     refreshInputPreview();
     showToast('Data dihapus.');
